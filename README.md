@@ -3,13 +3,14 @@ qub3rt
 
 qub3rt is TensorFlow model that can solve Rubik's cube. It can be used either
 standalone to solve virtual cube or real cube when connected to Lego EV3
-MindCub3r robot. Timelapse video of the robot in action at https://youtu.be/Xj4HfMxx3QM
+MindCub3r robot. Timelapse video of the robot in action at https://youtu.be/Xj4HfMxx3QM.
 
 TL;DR
 =====
 
-Just try running model.py and go from there. If you are messing with this
-then chances are you have most if not all of dependencies already in place.
+Just try running model.py and go from there. On executing the file in the first attempt, the model will train on the dataset. On completion of the training and validation, the script will make use of a webcam to detect the faces of the cube which will be converted into a format that the model takes in. Users can calibrate the cube colors according to the colors present on their cube. The model then takes in the cube configuration and then outputs moves which culminate upon reaching the final state.
+Then a Tkinter window will pop up containing the current cube configuration, which upon clicking a button will change according to the moves given by the model.
+
 
 Standalone use
 ==============
