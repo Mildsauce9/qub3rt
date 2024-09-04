@@ -4,22 +4,28 @@
   <antbob@users.noreply.github.com> wrote this file. As long as you retain
   this notice you can do whatever you want with this stuff. If we meet
   some day, and you think this stuff is worth it, you can buy me a beer in
-  return Anton Bobrov
+  r
   ----------------------------------------------------------------------------
 """
-
+from tkinter import Tk, Canvas, Label, Button, TkVersion
+import tkinter as tk
 import os
 import sys
 import glob
 import shutil
 import argparse
 import datetime
+import tkinter
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import pycuber as pc
 from pycuber.solver import CFOPSolver
-
+from keras.models import model_from_json
+from keras.utils import to_categorical
+from keras.preprocessing.image import load_img
+from keras.models import Sequential
+from keras.layers import Dense, Conv2D, Dropout, Flatten, MaxPooling2D
 # TF model constants.
 TRAIN_STEPS = 100000
 VALID_STEPS = 10000
@@ -79,7 +85,35 @@ def cubeAsArray(acube):
             for y in [0,1,2]:
                 cubeArray.append(COLORS[str(face[x][y])])
     return cubeArray
-
+def cvtToNumber( notation):
+    notations = {
+    'F':'G',
+    'D':'W',
+    'B':'B',
+    'L': 'R',
+    'R': 'O',
+    'U':'Y'
+    }
+    colors = {
+        'R' : 0,
+        'Y' : 1,
+        'G' : 2,
+        'W' : 3,
+        'O' : 4,
+        'B' : 5
+    }
+    out3 = ""
+    out2 = ""
+    for i in notation:
+        out3+= str(notations[i]);
+        
+    for i in out3:
+        out2 += str(colors[i])
+    return out2;
+def flip(notation):
+    if(type(notation) == int ):
+      return "Not scanned properly"
+    return notation[9:18] + notation[27:36] + notation[18:27] + notation[0:9] + notation[36:]
 # Features dict will have an array of values for each square as
 # they evolve from the initial cube state to solved cube state.
 def build_features_dict(features_dict, features_array):
@@ -87,7 +121,9 @@ def build_features_dict(features_dict, features_array):
     features_dict.update({COLUMNS[str(lindex)]:
         np.array(features_array[lindex - 1])})
     lindex = lindex + 1
-
+def print_E_and_exit(code):
+  if(code == 1):
+    print("\033[1;33mCube is incorrectly scanned, please try again\033[0m")
 # Features array will have an array of values for each square as
 # they evolve from the initial cube state to solved cube state.
 def build_features_array(features_array, cube_array):
@@ -286,7 +322,7 @@ if latest_checkpoint is None:
   alg = pc.Formula()
   random_alg = alg.random()
   eval_cube(random_alg)
-  eval_cube_array = cubeAsArray(eval_cube)
+  eval_cube_array = (eval_cube)
   solver = CFOPSolver(eval_cube)
   eval_solution = solver.solve(suppress_progress_messages=True)
   eval_solution = eval_solution.optimise()
@@ -317,6 +353,8 @@ if latest_checkpoint is None:
     sys.exit("sanity check failed")
 
 else:
+  model_json = model.to_json()
+  
   # Load the previously saved weights
   model.load_weights(latest_checkpoint)
   print('\n# Fit restored from checkpoint\n')
@@ -326,106 +364,125 @@ else:
 
 predict_cube = None
 
+
 # Get scrambled cube.
-if args.cube is None:
-  print('\n  Generating random cube\n')
-  predict_cube = pc.Cube()
-  alg = pc.Formula()
-  random_alg = alg.random()
-  predict_cube(random_alg)
-else:
-  predict_cube = pc.Cube(pc.array_to_cubies(list(args.cube)))
 
-predict_cube_array = cubeAsArray(predict_cube)
-
-# PyCuber can verify that a cube is valid (read solvable)
-# however it can let some things slip eg color mismatches.
-try:
-  print('\n  Verify cube\n')
-  py_cube = pc.Cube(pc.array_to_cubies(predict_cube_array))
-  py_solver = CFOPSolver(py_cube)
-  py_solver.solve(suppress_progress_messages=True)
-except ValueError as ve:
-  sys.exit(ve)
-
-print('\n  Initial cube:\n')
-print(repr(predict_cube))
-
-predicted_cube_arrays = [predict_cube_array]
-predicted_solution = []
-predictions_index = 0
-
-print('\n# Generate predictions')
 
 # While model accuracy is pretty good it is not perfect so it will
 # trip from time to time. The logic here is to detect when it does
 # and backtrack allowing it to try lesser scored predictions next.
 # Cap max iterations just in case an infinite loop happens somehow.
-for nstep in range(0,1000):
 
-  predict_features_array = init_features_array()
-  predict_features_dict = dict()
-  build_features_array(predict_features_array, predict_cube_array)
-  build_features_dict(predict_features_dict, predict_features_array)
+def start_solving():
+  if args.cube is None:
+    from video import webcam
+    #print('\n  Generating random cube\n')
+    # predict_cube = pc.Cube()
+    # alg = pc.Formula()
+    # random_alg = alg.random()
+    # predict_cube(random_alg)
+    state = webcam.run()
+    print(state)
+    if(isinstance(state, int)) and state > 0:
+      print_E_and_exit(state);
+    predict_cube = pc.Cube(pc.array_to_cubies(list(cvtToNumber(flip(state)))))
+  else:
+    predict_cube = pc.Cube(pc.array_to_cubies(list(cvtToNumber(flip(args.cube)))))
 
-  predictions = model.predict(predict_features_dict)
-  predictions = tf.reshape(predictions, [-1])
-  top_predictions = get_top_predictions(predictions)
+  predict_cube_array = cubeAsArray(predict_cube)
 
-  # Should not happen but if it does, end gracefully.
-  if predictions_index > (len(top_predictions) - 1):
-    print('\n  Predictions exhausted, cannot continue\n')
-    break
+  # PyCuber can verify that a cube is valid (read solvable)
+  # however it can let some things slip eg color mismatches.
+  try:
+    print('\n  Verify cube\n')
+    py_cube = pc.Cube(pc.array_to_cubies(predict_cube_array))
+    # py_cube = pc.Cube(pc.array_to_cubies(list(args.cube)))
+    py_solver = CFOPSolver(py_cube)
+    py_solver.solve(suppress_progress_messages=True)
+  except ValueError as ve:
+    sys.exit(ve)
 
-  predicted_next_step = top_predictions[predictions_index]
+  print('\n  Initial cube:\n')
+  print(repr(predict_cube))
 
-  print('\n  Predicted step:', predicted_next_step)
-  print('  Top predictions:', top_predictions)
+  predicted_cube_arrays = [predict_cube_array]
+  predicted_solution = []
+  predictions_index = 0
 
-  if predicted_next_step == '#':
-    print('\n  Last step predicted\n')
-    if predict_cube != SOLVED_CUBE:
-      predictions_index = predictions_index + 1
-      print('\n  Cube not solved, step back\n')
-      continue
+  print('\n# Generate predictions')
+  for nstep in range(0,1000):
 
-  if predict_cube == SOLVED_CUBE:
-    predicted_solution.append(predicted_next_step)
-    print('\n  Cube is solved, stop predicting\n')
-    break
+    predict_features_array = init_features_array()
+    predict_features_dict = dict()
+    build_features_array(predict_features_array, predict_cube_array)
+    build_features_dict(predict_features_dict, predict_features_array)
 
-  predict_cube.perform_step(predicted_next_step)
-  new_cube_array = cubeAsArray(predict_cube)
+    predictions = model.predict(predict_features_dict)
+    predictions = tf.reshape(predictions, [-1])
+    top_predictions = get_top_predictions(predictions)
 
-  step_back = False
-  for carray in predicted_cube_arrays:
-    if carray == new_cube_array:
-      predict_cube = pc.Cube(pc.array_to_cubies(predict_cube_array))
-      predictions_index = predictions_index + 1
-      step_back = True
-      print('\n  Loop detected, step back\n')
+    # Should not happen but if it does, end gracefully.
+    if predictions_index > (len(top_predictions) - 1):
+      print('\n  Predictions exhausted, cannot continue\n')
       break
 
-  if not step_back:
-    predictions_index = 0
-    predict_cube_array = new_cube_array
-    predicted_solution.append(predicted_next_step)
-    predicted_cube_arrays.append(predict_cube_array)
+    predicted_next_step = top_predictions[predictions_index]
 
-print('\n  Finished cube:\n')
-print(repr(predict_cube))
+    print('\n  Predicted step:', predicted_next_step)
 
-# This could happen when cube colors are mismatched,
-# which PyCuber verification wont be able to catch.
-if predict_cube != SOLVED_CUBE:
-  sys.exit('cube failure')
+    if predicted_next_step == '#':
+      print('\n  Last step predicted\n')
+      if predict_cube != SOLVED_CUBE:
+        predictions_index = predictions_index + 1
+        print('\n  Cube not solved, step back\n')
+        continue
 
-print('\n  Predicted solution:', predicted_solution)
-print('\n  Predicted solution steps:',
-    len(predicted_solution[0:-1]), '\n')
+    if predict_cube == SOLVED_CUBE:
+      predicted_solution.append(predicted_next_step)
+      print('\n  Cube is solved, stop predicting\n')
+      break
 
-# Clean print predicted solution so it can be parsed easily if needed.
-# This should be the last line that goes to stdout, for scripted use.
-print(' '.join(predicted_solution[0:-1]), file=sys.stdout, flush=True)
+    predict_cube.perform_step(predicted_next_step)
+    print(repr(predict_cube))
+    new_cube_array = cubeAsArray(predict_cube)
 
-sys.exit(0)
+    step_back = False
+    for carray in predicted_cube_arrays:
+      if carray == new_cube_array:
+        predict_cube = pc.Cube(pc.array_to_cubies(predict_cube_array))
+        predictions_index = predictions_index + 1
+        step_back = True
+        print('\n  Loop detected, step back\n')
+        break
+
+    if not step_back:
+      predictions_index = 0
+      predict_cube_array = new_cube_array
+      predicted_solution.append(predicted_next_step)
+      predicted_cube_arrays.append(predict_cube_array)
+
+  print('\n  Finished cube:\n')
+  
+
+  # This could happen when cube colors are mismatched,
+  # which PyCuber verification wont be able to catch.
+  if predict_cube != SOLVED_CUBE:
+    sys.exit('cube failure')
+
+  print('\n  Predicted solution:', predicted_solution)
+  print('\n  Predicted solution steps:',
+      len(predicted_solution[0:-1]), '\n')
+
+  # Clean print predicted solution so it can be parsed easily if needed.
+  # This should be the last line that goes to stdout, for scripted use.
+  canvas.create_text((300, 100), text = ' '.join(predicted_solution[0:-1]), file=sys.stdout, flush=True)
+
+  sys.exit(0)
+
+root = Tk()
+root.title("Solution")
+canvas = Canvas(root, width = 600, height = 400, bg = "white")
+canvas.pack(anchor = tkinter.CENTER, expand = True)
+root.mainloop()
+start_solving()
+
